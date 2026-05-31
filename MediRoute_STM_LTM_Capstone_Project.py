@@ -59,7 +59,7 @@ from langgraph.graph import (
 # API KEY
 # ==========================================================
 
-os.environ["GROQ_API_KEY"] = "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"
+os.environ["GROQ_API_KEY"] = "YOUR_GROQ_API_KEY"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
