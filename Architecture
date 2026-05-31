@@ -1,0 +1,33 @@
+                START
+                   │
+                   ▼
+            Intake Agent
+                   │
+                   ▼
+             RAG Agent
+                   │
+                   ▼
+      Long-Term Memory Retrieval
+                   │
+                   ▼
+           Risk Assessment
+                   │
+                   ▼
+        Clinical Reasoning
+                   │
+                   ▼
+          Confidence Agent
+                   │
+                   ▼
+       Short-Term Memory Agent
+                   │
+          ┌────────┴─────────┐
+          ▼                  ▼
+    Human Review         Finalize
+          │                  │
+          └───────END────────┘
+
+Finalize
+   │
+   ▼
+Store in Long-Term Memory
