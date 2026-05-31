@@ -1,33 +1,32 @@
-                START
-                   │
-                   ▼
-            Intake Agent
-                   │
-                   ▼
-             RAG Agent
-                   │
-                   ▼
-      Long-Term Memory Retrieval
-                   │
-                   ▼
-           Risk Assessment
-                   │
-                   ▼
-        Clinical Reasoning
-                   │
-                   ▼
-          Confidence Agent
-                   │
-                   ▼
-       Short-Term Memory Agent
-                   │
-          ┌────────┴─────────┐
-          ▼                  ▼
-    Human Review         Finalize
-          │                  │
-          └───────END────────┘
-
-Finalize
+Patient
    │
    ▼
-Store in Long-Term Memory
+Intake Agent
+   │
+   ▼
+Memory Agent
+   ├── STM (deque)
+   └── LTM (JSON)
+   │
+   ▼
+RAG Agent
+   │
+   ▼
+FAISS Vector Search
+   │
+   ▼
+Risk Agent
+   │
+   ▼
+Reasoning Agent (Groq Llama 3.3 70B)
+   │
+   ▼
+Confidence Agent
+   │
+   ├── Review Agent (if needed)
+   │
+   ▼
+Final Agent
+   │
+   ├── Save STM
+   └── Save LTM
