@@ -13,6 +13,8 @@ from langchain_community.vectorstores import FAISS
 from rag.embeddings import embedding_model
 from config.settings import FAISS_DB_PATH
 
+from rag.load_vector_db import load_vector_db
+
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
@@ -60,3 +62,31 @@ def load_vector_db():
         embedding_model,
         allow_dangerous_deserialization=True
     )
+
+
+def rag_agent(state):
+
+    vectordb = load_vector_db()
+
+    query = f"""
+Symptoms:
+{state['symptoms']}
+
+History:
+{state['patient_history']}
+
+Labs:
+{state['labs']}
+"""
+
+    docs = vectordb.similarity_search(
+        query,
+        k=5
+    )
+
+    state["retrieved_docs"] = [
+        d.page_content
+        for d in docs
+    ]
+
+    return state
