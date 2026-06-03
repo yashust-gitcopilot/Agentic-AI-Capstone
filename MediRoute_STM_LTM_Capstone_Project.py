@@ -52,14 +52,15 @@ from langchain_community.vectorstores import (
 
 from langgraph.graph import (
     StateGraph,
-    END
+    END,
+    START # Import START node
 )
 
 # ==========================================================
 # API KEY
 # ==========================================================
 
-os.environ["GROQ_API_KEY"] = "YOUR_GROQ_API_KEY"
+os.environ["GROQ_API_KEY"] = "GROQ_API_KEY"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -91,7 +92,7 @@ MEMORY_FILE = "/content/patient_memory.json"
 
 # ==========================================================
 # STM
-# ==========================================================
+# ==========================================================)
 
 STM_MEMORY = deque(maxlen=10)
 
@@ -163,7 +164,7 @@ def load_vector_db():
         embedding_model,
         allow_dangerous_deserialization=True
     )
-    
+
 # ==========================================================
 # SAVE CASE TO LTM
 # ==========================================================
@@ -201,15 +202,15 @@ def save_case_to_ltm(state):
     data.append(case)
 
     with open(
-        MEMORY_FILE,
-        "w"
-    ) as f:
+            MEMORY_FILE,
+            "w"
+        ) as f:
 
-        json.dump(
-            data,
-            f,
-            indent=4
-        )
+            json.dump(
+                data,
+                f,
+                indent=4
+            )
 
 
 # ==========================================================
@@ -264,6 +265,95 @@ class TriageState(TypedDict):
     needs_review: bool
 
     final_output: dict
+
+    query_response: str # New field for query responses
+    next_step_decision: str # To store the routing decision
+
+# ==========================================================
+# ROUTER: CLASSIFY INPUT (SYMPTOM OR QUERY)
+# ==========================================================
+
+def route_input(state):
+    symptoms_input = state["symptoms"].strip().lower()
+    query_phrases = [
+        "what is my last symptom?",
+        "what is my last symptoms?",
+        "what was the risk score?",
+        "what should i do for this disease?",
+        "explain the reasoning",
+        "tell me more about"
+    ]
+
+    for phrase in query_phrases:
+        if phrase in symptoms_input:
+            print(f"✓ Input Classifier: Detected query '{symptoms_input}'. Routing to Query Agent.")
+            return "query_agent"
+
+    print(f"✓ Input Classifier: Detected symptoms '{symptoms_input}'. Routing to Intake Agent.")
+    return "intake"
+
+
+# ==========================================================
+# AGENT 0: QUERY AGENT
+# ==========================================================
+
+def query_agent(state):
+    query = state["symptoms"]
+    response_text = "I'm sorry, I cannot answer that query from the available information."
+
+    # Attempt to answer 'what is my last symptom?'
+    if "what is my last symptom?" in query.lower() or "what is my last symptoms?" in query.lower():
+        if STM_MEMORY:
+            last_triage = STM_MEMORY[-1]
+            if "symptoms" in last_triage:
+                response_text = f"Your last recorded symptom was: {last_triage['symptoms']}"
+            else:
+                response_text = "No specific symptoms found in the last STM entry."
+        else:
+            response_text = "No previous symptoms found in short-term memory."
+
+    # Attempt to answer 'what was the risk score?'
+    elif "what was the risk score?" in query.lower():
+        if STM_MEMORY:
+            last_triage = STM_MEMORY[-1]
+            if "risk_score" in last_triage:
+                response_text = f"The risk score for the last triage was: {last_triage['risk_score']}"
+            else:
+                response_text = "No risk score found in the last STM entry."
+        else:
+            response_text = "No previous triage data found in short-term memory."
+
+    # Attempt to answer 'explain the reasoning' or similar
+    elif "explain the reasoning" in query.lower() or "tell me more about" in query.lower():
+        if STM_MEMORY:
+            last_triage = STM_MEMORY[-1]
+            if "final_output" in last_triage and "reasoning" in last_triage["final_output"]:
+                response_text = f"Here is the reasoning from the last triage: {last_triage['final_output']['reasoning']}"
+            else:
+                response_text = "No detailed reasoning found in the last STM entry."
+        else:
+            response_text = "No previous triage data found to explain reasoning."
+
+    # General LLM query if specific patterns not matched but it's clearly a query
+    elif query.strip() != "": # If it's not empty, try a general LLM response
+        try:
+            # Construct a prompt for the LLM to answer the query based on available STM/LTM
+            stm_context = f"Recent patient symptoms: {STM_MEMORY[-1]['symptoms'] if STM_MEMORY else 'None'}"
+            ltm_context = f"Historical cases: {state['ltm_cases']}"
+            llm_query_prompt = f"Given the following context: {stm_context}. {ltm_context}. User asks: {query}. Provide a concise answer."
+
+            llm_response = llm.invoke([
+                SystemMessage(content="You are a helpful assistant providing information based on patient data."),
+                HumanMessage(content=llm_query_prompt)
+            ])
+            response_text = llm_response.content
+        except Exception as e:
+            print(f"Error in general LLM query: {e}")
+            response_text = "I encountered an error trying to process your general query."
+
+    state["query_response"] = response_text
+    print("✓ Query Agent Completed")
+    return state
 
 
 # ==========================================================
@@ -673,38 +763,29 @@ def review_agent(state):
 
 def finalize_agent(state):
 
-    state["final_output"] = {
-
+    final_output_data = {
         "priority":
             state["priority"],
-
         "risk_score":
             state["risk_score"],
-
         "confidence":
             state["confidence"],
-
         "needs_review":
             state["needs_review"],
-
         "reasoning":
             state["reasoning"]
     }
+    state["final_output"] = final_output_data
 
     # ----------------------------------
     # SAVE TO STM
     # ----------------------------------
 
     STM_MEMORY.append({
-
-        "symptoms":
-            state["symptoms"],
-
-        "priority":
-            state["priority"],
-
-        "risk_score":
-            state["risk_score"]
+        "symptoms": state["symptoms"],
+        "priority": state["priority"],
+        "risk_score": state["risk_score"],
+        "final_output": final_output_data # Store the full output
     })
 
     # ----------------------------------
@@ -720,6 +801,10 @@ def finalize_agent(state):
     )
 
     print(
+        state["symptoms"]
+    )
+
+    print(
         "✓ Saved To LTM"
     )
 
@@ -730,7 +815,7 @@ def finalize_agent(state):
     return state
 
 # ==========================================================
-# ROUTER
+# ROUTER (FOR TRIAGE REVIEW)
 # ==========================================================
 
 def route_review(state):
@@ -750,6 +835,14 @@ def route_review(state):
     return "final"
 
 # ==========================================================
+# DEDICATED INITIAL ROUTER NODE
+# ==========================================================
+
+def initial_router_node(state):
+    next_step = route_input(state)
+    return {"next_step_decision": next_step}
+
+# ==========================================================
 # BUILD LANGGRAPH
 # ==========================================================
 
@@ -760,6 +853,16 @@ builder = StateGraph(
 # ----------------------------------
 # NODES
 # ----------------------------------
+
+builder.add_node(
+    "initial_router_node",
+    initial_router_node
+)
+
+builder.add_node(
+    "query_agent",
+    query_agent
+)
 
 builder.add_node(
     "intake",
@@ -802,15 +905,30 @@ builder.add_node(
 )
 
 # ----------------------------------
-# ENTRY
+# ENTRY & ROUTING
 # ----------------------------------
 
-builder.set_entry_point(
-    "intake"
+builder.set_entry_point("initial_router_node")
+
+builder.add_conditional_edges(
+    "initial_router_node",
+    lambda state: state["next_step_decision"],
+    {
+        "query_agent": "query_agent",
+        "intake": "intake"
+    }
 )
 
 # ----------------------------------
-# FLOW
+# FLOW FOR QUERY AGENT (ENDS IMMEDIATELY)
+# ----------------------------------
+builder.add_edge(
+    "query_agent",
+    END
+)
+
+# ----------------------------------
+# FLOW FOR TRIAGE AGENTS
 # ----------------------------------
 
 builder.add_edge(
@@ -839,7 +957,7 @@ builder.add_edge(
 )
 
 # ----------------------------------
-# CONDITIONAL ROUTING
+# CONDITIONAL ROUTING FOR TRIAGE (review or final)
 # ----------------------------------
 
 builder.add_conditional_edges(
@@ -870,7 +988,7 @@ builder.add_edge(
 
 # ----------------------------------
 # COMPILE
-# ----------------------------------
+# ==========================================================
 
 graph = builder.compile()
 
@@ -878,9 +996,6 @@ print(
     "✓ LangGraph Ready"
 )
 
-# ==========================================================
-# MAIN
-# ==========================================================
 
 if __name__ == "__main__":
 
@@ -931,14 +1046,12 @@ if __name__ == "__main__":
     # RUN GRAPH
     # ----------------------------------
 
-    result = graph.invoke({
+    # First run to populate STM_MEMORY with a full triage output
+    print("\n--- First Run: Initial Symptom Triage ---")
+    result1 = graph.invoke({
 
         "symptoms":
-        """
-        Severe chest pain
-        radiating to left arm
-        with shortness of breath
-        """,
+        "Severe chest pain radiating to left arm with shortness of breath",
 
         "patient_history":
             patient_history,
@@ -947,26 +1060,67 @@ if __name__ == "__main__":
             labs
     })
 
-    # ----------------------------------
-    # PRINT RESULTS
-    # ----------------------------------
-
-    print("\n")
-
-    print("=" * 70)
-
+    # Print the full triage output for the first run
+    print("\n======================================================================")
+    print("FINAL TRIAGE OUTPUT (First Run)")
+    print("======================================================================")
     print(
-        "FINAL TRIAGE OUTPUT"
-    )
-
-    print("=" * 70)
-
-    print(
-
         json.dumps(
-
-            result["final_output"],
-
+            result1["final_output"],
             indent=4
         )
-    )    
+    )
+
+    # Second run with a query
+    print("\n--- Second Run: Query for last symptom ---")
+    query_result_last_symptom = graph.invoke({
+
+        "symptoms":
+            "What is my last symptom?", # Pass the query string
+
+        "patient_history":
+            patient_history, # Still need to pass these, though they might not be used by query_agent
+
+        "labs":
+            labs
+    })
+
+    # Print the query response
+    print("\n======================================================================")
+    print("QUERY RESPONSE (What is my last symptom?)")
+    print("======================================================================")
+    print(query_result_last_symptom["query_response"])
+
+    # Third run with another query
+    print("\n--- Third Run: Query for risk score ---")
+    query_result_risk_score = graph.invoke({
+
+        "symptoms":
+            "What was the risk score?", # Another query
+
+        "patient_history":
+            patient_history,
+
+        "labs":
+            labs
+    })
+
+    # Print the query response
+    print("\n======================================================================")
+    print("QUERY RESPONSE (What was the risk score?)")
+    print("======================================================================")
+    print(query_result_risk_score["query_response"])
+
+    # Fourth run with a general query
+    print("\n--- Fourth Run: General query ---")
+    query_result_general = graph.invoke({
+
+        "symptoms":
+            "Tell me about this patient's conditions.", # General query
+
+        "patient_history":
+            patient_history,
+
+        "labs":
+            labs
+    })
