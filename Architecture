@@ -1,14 +1,14 @@
 Patient
-   │
-   ▼
-Intake Agent
-   │
-   ▼
-Memory Agent
-   ├── STM (deque)
-   └── LTM (JSON)
-   │
-   ▼
+  │
+  ▼
+initial_router_node
+  │
+  ▼
+memory
+  │
+  ├──────────────► query_agent ─────► END
+  │
+  ▼
 RAG Agent
    │
    ▼
